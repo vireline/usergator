@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -72,11 +73,15 @@ def check(
         console=console,
     ) as progress:
         task = progress.add_task("checking…", total=len(list(_iter_sites())))
-        for item in check_username(username, SITES, concurrency=concurrency):
+
+        async def _run():
+            return await check_username(username, SITES, concurrency=concurrency)
+
+        items = asyncio.run(_run())
+        for item in items:
             results.append(item)
             progress.advance(task)
-
-    # Pretty table
+# Pretty table
     table = Table(title=f"Results • {username}")
     table.add_column("Site", style="bold")
     table.add_column("Status")
