@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
-usergator = "usergator.cli:app"
+usergator = "usergator.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/usergator"]
