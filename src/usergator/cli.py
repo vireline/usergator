@@ -1,8 +1,15 @@
-from __future__ import annotations
+cd ~/usergator
+
+python3 - <<'PY'
+from pathlib import Path
+
+p = Path("src/usergator/cli.py")
+
+code = r'''from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import typer
 from rich.console import Console
@@ -16,14 +23,56 @@ app = typer.Typer(add_completion=False, help="OSINT username footprint investiga
 console = Console()
 
 
+def _iter_sites() -> Iterable[tuple[str, str]]:
+    """
+    Normalize SITES into (name, pattern/url) pairs.
+
+    Supports:
+    - dict: {"GitHub": "https://github.com/{u}", ...}
+    - list/tuple of 2-tuples: [("GitHub","https://..."), ...]
+    - list of dicts: [{"name":"GitHub","url":"..."}, {"site":"GitHub","pattern":"..."}]
+    - list of strings: ["https://github.com/{u}", ...] (falls back to numbered names)
+    """
+    s = SITES
+
+    if isinstance(s, dict):
+        for k, v in s.items():
+            yield str(k), str(v)
+        return
+
+    if isinstance(s, (list, tuple)):
+        for i, item in enumerate(s, 1):
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                yield str(item[0]), str(item[1])
+            elif isinstance(item, dict):
+                name = item.get("name") or item.get("site") or f"Site {i}"
+                pat = item.get("url") or item.get("pattern") or item.get("link") or ""
+                yield str(name), str(pat)
+            elif isinstance(item, str):
+                yield f"Site {i}", item
+            else:
+                yield f"Site {i}", str(item)
+        return
+
+    # Unknown structure — last resort:
+    yield "Sites", str(s)
+
+
+def _sites_len() -> int:
+    try:
+        return len(SITES)  # type: ignore[arg-type]
+    except Exception:
+        return sum(1 for _ in _iter_sites())
+
+
 @app.command()
 def sites() -> None:
     """List the built-in site patterns."""
     table = Table(title="usergator • sources", header_style="bold magenta")
     table.add_column("Site", style="bold")
-    table.add_column("Pattern", style="dim")
-    for s in SITES:
-        table.add_row(s.name, s.url)
+    table.add_column("Pattern", style="dim", overflow="fold")
+    for name, pat in _iter_sites():
+        table.add_row(name, pat)
     console.print(table)
 
 
@@ -36,7 +85,13 @@ def check(
     concurrency: int = typer.Option(8, "--concurrency", min=1, max=64, help="Concurrent requests"),
 ) -> None:
     """Check a username across the curated list."""
-    console.print(f"\n[bold cyan]usergator[/bold cyan]  scanning  [bold]{username}[/bold]  ([dim]{len(SITES)} sites[/dim])\n")
+    total = _sites_len()
+    console.print(
+        f"\n[bold cyan]usergator[/bold cyan]  scanning  [bold]{username}[/bold]  "
+        f"([dim]{total} sites[/dim])\n"
+    )
+
+    results: list[dict[str, Any]] = []
 
     with Progress(
         SpinnerColumn(),
@@ -45,16 +100,16 @@ def check(
         TimeElapsedColumn(),
         console=console,
     ) as progress:
-        task = progress.add_task("checking…", total=len(SITES))
-        results = []
-        for item in check_username(username, concurrency=concurrency):
+        task = progress.add_task("checking…", total=total)
+
+        # IMPORTANT: checker expects site_patterns as a required positional arg
+        for item in check_username(username, SITES, concurrency=concurrency):
             results.append(item)
             progress.advance(task)
 
-    # Pretty table
-    table = Table(title=None, header_style="bold magenta")
+    table = Table(header_style="bold magenta")
     table.add_column("Site", style="bold")
-    table.add_column("URL", overflow="fold", style="dim")
+    table.add_column("URL", style="dim", overflow="fold")
     table.add_column("Status", justify="center")
 
     def fmt(status: str) -> str:
@@ -65,10 +120,7 @@ def check(
             return "[dim]NOT FOUND[/dim]"
         return "[yellow]UNKNOWN[/yellow]"
 
-    found = 0
-    not_found = 0
-    unknown = 0
-
+    found = not_found = unknown = 0
     for r in results:
         status = (r.get("status") or "UNKNOWN").upper()
         if status == "FOUND":
@@ -78,7 +130,7 @@ def check(
         else:
             unknown += 1
 
-        table.add_row(r.get("site", "?"), r.get("url", ""), fmt(status))
+        table.add_row(str(r.get("site", "?")), str(r.get("url", "")), fmt(status))
 
     console.print(table)
     console.print(
@@ -98,3 +150,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+'''
+p.write_text(code, encoding="utf-8")
+print("✅ Rewrote src/usergator/cli.py with robust SITES handling + correct check_username() call.")
+PY
