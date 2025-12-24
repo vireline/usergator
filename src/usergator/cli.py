@@ -12,20 +12,27 @@ from rich.table import Table
 
 from .checker import check_username
 from .sites import SITES
+try:
+    from .sites import SITE_PATTERNS as _PAT
+except Exception:
+    try:
+        from .sites import PATTERNS as _PAT
+    except Exception:
+        _PAT = None
+
 
 app = typer.Typer(add_completion=False, help="OSINT username footprint investigator")
 console = Console()
 
 
-def _iter_sites() -> Iterable[tuple[str, str]]:
-    """
-    SITES in this project has been edited a few times, so we accept either:
-      - list[str] (site names) + URL built elsewhere
-      - list[objects] with .name and .url
-      - list[tuple(name, url)]
-      - dict-like items with keys name/url
-    This keeps CLI robust.
-    """
+def _iter_sites():
+    # Preferred: dict name->url pattern
+    if isinstance(_PAT, dict):
+        for k, v in _PAT.items():
+            yield str(k), str(v)
+        return
+
+    # Otherwise accept tuples/objects/dicts, or fallback to strings
     for s in SITES:
         if isinstance(s, tuple) and len(s) == 2:
             yield str(s[0]), str(s[1])
@@ -34,10 +41,7 @@ def _iter_sites() -> Iterable[tuple[str, str]]:
         elif hasattr(s, "name") and hasattr(s, "url"):
             yield str(s.name), str(s.url)
         else:
-            # fallback: best effort string + unknown pattern
             yield str(s), ""
-
-
 @app.command()
 def sites() -> None:
     """List the built-in site patterns."""
