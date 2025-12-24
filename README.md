@@ -9,6 +9,20 @@ A **legal OSINT username footprint checker**. Give it a username; it checks a cu
 
 ## Install (dev)
 ```bash
+git clone https://github.com/vireline/usergator
+cd usergator
+
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+pip install -e .
+
+# smoke tests
+usergator --help
+usergator sites
+usergator check octocat
+usergator check octocat --json out.json && cat out.json | head
+
 python -m venv .venv && source .venv/bin/activate
 pip install -U pip
 pip install -e .
