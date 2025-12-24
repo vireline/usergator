@@ -8,6 +8,7 @@ from typing import Any
 
 import typer
 from rich.console import Console
+from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
@@ -19,12 +20,11 @@ console = Console()
 
 
 def _result_to_dict(r: Any) -> dict[str, Any]:
-    # check_username returns CheckResult objects (dataclass-ish). Support dict too.
+    """Normalize CheckResult/dataclass/obj/dict into a plain dict."""
     if isinstance(r, dict):
         return r
     if is_dataclass(r):
         return asdict(r)
-    # fallback: read attrs
     return {
         "site": getattr(r, "site", None),
         "url": getattr(r, "url", None),
@@ -37,11 +37,19 @@ def _result_to_dict(r: Any) -> dict[str, Any]:
 @app.command()
 def sites() -> None:
     """List the built-in site patterns."""
-    table = Table(title="usergator • Username Sources", header_style="bold")
+    table = Table(
+        title="usergator • Username Sources",
+        header_style="bold cyan",
+        border_style="cyan",
+        show_lines=False,
+    )
     table.add_column("Site", style="bold")
     table.add_column("Pattern", style="dim")
+
+    # SITES is a dict[str, str]
     for name, pattern in SITES.items():
         table.add_row(str(name), str(pattern))
+
     console.print(table)
 
 
@@ -55,15 +63,20 @@ def check(
 ) -> None:
     """Check a username across the curated list."""
     console.print(
-        f"[bold cyan]usergator[/bold cyan] • scanning [bold]{username}[/bold]  ([dim]{len(SITES)} sites[/dim])"
+        Panel.fit(
+            f"[bold cyan]usergator[/bold cyan] • scanning [bold]{username}[/bold]\n"
+            f"[dim]{len(SITES)} sites • concurrency={concurrency}[/dim]",
+            border_style="cyan",
+        )
     )
 
-    async def _run():
+    async def _run() -> Any:
+        # check_username is async and returns a list of CheckResult (or dict-like)
         return await check_username(username, SITES, concurrency=concurrency)
 
     with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
+        SpinnerColumn(style="cyan"),
+        TextColumn("[bold]{task.description}[/bold]"),
         BarColumn(),
         TimeElapsedColumn(),
         console=console,
@@ -72,11 +85,14 @@ def check(
         items = asyncio.run(_run())
         progress.update(task, completed=len(SITES))
 
-    # normalize results
-    out = [_result_to_dict(x) for x in items]
+    out = [_result_to_dict(x) for x in (items or [])]
 
-    # render
-    table = Table(title=f"Results • {username}", header_style="bold")
+    table = Table(
+        title=f"Results • {username}",
+        header_style="bold cyan",
+        border_style="cyan",
+        show_lines=False,
+    )
     table.add_column("Site", style="bold")
     table.add_column("Status", justify="center")
     table.add_column("HTTP", justify="right", style="dim")
@@ -87,11 +103,15 @@ def check(
         ok = bool(d.get("exists"))
         code = d.get("status_code")
         err = d.get("error")
-        status = "[green]FOUND[/green]" if ok else "[red]not found[/red]"
+
         if err:
             status = "[yellow]error[/yellow]"
+        else:
+            status = "[green]FOUND[/green]" if ok else "[red]not found[/red]"
+
         if ok:
             found += 1
+
         table.add_row(
             str(d.get("site") or ""),
             status,
@@ -103,7 +123,10 @@ def check(
     console.print(f"[bold]{found}[/bold] found out of [bold]{len(out)}[/bold].")
 
     if json_out:
-        json_out.write_text(json.dumps(out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        json_out.write_text(
+            json.dumps(out, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
         console.print(f"[dim]Saved →[/dim] [bold]{json_out}[/bold]")
 
 
