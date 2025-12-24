@@ -1,4 +1,4 @@
-# usergator 🕵️‍♀️
+# usergator 🕵
 
 A **legal OSINT username footprint checker**. Give it a username; it checks a curated list of public profile URL patterns and reports what appears to exist.
 
