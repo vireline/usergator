@@ -26,7 +26,7 @@ def sites():
 @app.command()
 def check(
     username: str = typer.Argument(..., help="Username to check"),
-    json_out: Path | None = typer.Option(None, "--json", help="Write results to JSON file"),
+    json_out: Path | None = typer.Option(None, "--json-out", help="Write results to JSON file"),
     concurrency: int = typer.Option(8, help="Concurrent requests"),
 ):
     """Check a username across the curated list."""
