@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import json
 import asyncio
+import json
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -12,44 +13,35 @@ from rich.table import Table
 
 from .checker import check_username
 from .sites import SITES
-try:
-    from .sites import SITE_PATTERNS as _PAT
-except Exception:
-    try:
-        from .sites import PATTERNS as _PAT
-    except Exception:
-        _PAT = None
-
 
 app = typer.Typer(add_completion=False, help="OSINT username footprint investigator")
 console = Console()
 
 
-def _iter_sites():
-    # Preferred: dict name->url pattern
-    if isinstance(_PAT, dict):
-        for k, v in _PAT.items():
-            yield str(k), str(v)
-        return
+def _result_to_dict(r: Any) -> dict[str, Any]:
+    # check_username returns CheckResult objects (dataclass-ish). Support dict too.
+    if isinstance(r, dict):
+        return r
+    if is_dataclass(r):
+        return asdict(r)
+    # fallback: read attrs
+    return {
+        "site": getattr(r, "site", None),
+        "url": getattr(r, "url", None),
+        "exists": getattr(r, "exists", None),
+        "status_code": getattr(r, "status_code", None),
+        "error": getattr(r, "error", None),
+    }
 
-    # Otherwise accept tuples/objects/dicts, or fallback to strings
-    for s in SITES:
-        if isinstance(s, tuple) and len(s) == 2:
-            yield str(s[0]), str(s[1])
-        elif isinstance(s, dict):
-            yield str(s.get("name")), str(s.get("url"))
-        elif hasattr(s, "name") and hasattr(s, "url"):
-            yield str(s.name), str(s.url)
-        else:
-            yield str(s), ""
+
 @app.command()
 def sites() -> None:
     """List the built-in site patterns."""
-    table = Table(title="usergator • Username Sources")
-    table.add_column("Site", style="bold magenta")
+    table = Table(title="usergator • Username Sources", header_style="bold")
+    table.add_column("Site", style="bold")
     table.add_column("Pattern", style="dim")
-    for name, url in _iter_sites():
-        table.add_row(name, url)
+    for name, pattern in SITES.items():
+        table.add_row(str(name), str(pattern))
     console.print(table)
 
 
@@ -63,11 +55,11 @@ def check(
 ) -> None:
     """Check a username across the curated list."""
     console.print(
-        f"[bold cyan]usergator[/bold cyan] • scanning [bold]{username}[/bold]  "
-        f"([dim]{len(list(_iter_sites()))} sites[/dim])"
+        f"[bold cyan]usergator[/bold cyan] • scanning [bold]{username}[/bold]  ([dim]{len(SITES)} sites[/dim])"
     )
 
-    results: list[dict[str, Any]] = []
+    async def _run():
+        return await check_username(username, SITES, concurrency=concurrency)
 
     with Progress(
         SpinnerColumn(),
@@ -76,42 +68,42 @@ def check(
         TimeElapsedColumn(),
         console=console,
     ) as progress:
-        task = progress.add_task("checking…", total=len(list(_iter_sites())))
-
-        async def _run():
-            return await check_username(username, SITES, concurrency=concurrency)
-
+        task = progress.add_task("checking…", total=len(SITES))
         items = asyncio.run(_run())
-        for item in items:
-            results.append(item)
-            progress.advance(task)
-# Pretty table
-    table = Table(title=f"Results • {username}")
+        progress.update(task, completed=len(SITES))
+
+    # normalize results
+    out = [_result_to_dict(x) for x in items]
+
+    # render
+    table = Table(title=f"Results • {username}", header_style="bold")
     table.add_column("Site", style="bold")
-    table.add_column("Status")
-    table.add_column("URL", style="dim")
+    table.add_column("Status", justify="center")
+    table.add_column("HTTP", justify="right", style="dim")
+    table.add_column("URL", overflow="fold")
 
     found = 0
-    for r in results:
-        site = str(r.get("site", ""))
-        ok = bool(r.get("exists", False))
-        url = str(r.get("url", ""))
+    for d in out:
+        ok = bool(d.get("exists"))
+        code = d.get("status_code")
+        err = d.get("error")
         status = "[green]FOUND[/green]" if ok else "[red]not found[/red]"
+        if err:
+            status = "[yellow]error[/yellow]"
         if ok:
             found += 1
-        table.add_row(site, status, url)
+        table.add_row(
+            str(d.get("site") or ""),
+            status,
+            "" if code is None else str(code),
+            str(d.get("url") or ""),
+        )
 
     console.print(table)
-    console.print(f"[bold]Found:[/bold] {found}/{len(results)}")
+    console.print(f"[bold]{found}[/bold] found out of [bold]{len(out)}[/bold].")
 
     if json_out:
-        payload = {
-            "username": username,
-            "found": found,
-            "total": len(results),
-            "results": results,
-        }
-        json_out.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        json_out.write_text(json.dumps(out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         console.print(f"[dim]Saved →[/dim] [bold]{json_out}[/bold]")
 
 
